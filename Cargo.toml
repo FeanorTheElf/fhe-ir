@@ -1,0 +1,8 @@
+[package]
+name = "fhe-ir"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+elsa = "1.11.2"
+selfref = "0.4.3"
