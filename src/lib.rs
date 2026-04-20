@@ -51,7 +51,11 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     ///     @constant: [1, 2, 3, 4]
     /// "#.as_bytes()).unwrap().check().unwrap();
     /// ```
-    AddPtxCtx { out: Ident, value: Ident, plaintext: Ptx },
+    AddPtxCtx {
+        out: Ident,
+        value: Ident,
+        plaintext: Ptx,
+    },
     /// Ciphertext-ciphertext multiplication.
     ///
     /// # Example
@@ -78,7 +82,11 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     ///     @constant: [1, 2, 3, 4]
     /// "#.as_bytes()).unwrap().check().unwrap();
     /// ```
-    MulPtxCtx { out: Ident, value: Ident, plaintext: Ptx },
+    MulPtxCtx {
+        out: Ident,
+        value: Ident,
+        plaintext: Ptx,
+    },
     /// Integer-ciphertext multiplication.
     ///
     /// # Example
@@ -91,7 +99,11 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     ///     }
     /// "#.as_bytes()).unwrap().check().unwrap();
     /// ```
-    MulIntCtx { out: Ident, value: Ident, integer: i64 },
+    MulIntCtx {
+        out: Ident,
+        value: Ident,
+        integer: i64,
+    },
     /// Create a copy of a ciphertext.
     ///
     /// # Example
@@ -239,8 +251,12 @@ impl<Ptx> Program<Ptx> {
 
     ///
     /// Shorthand for [`Program::new()`] followed by [`Program::check()`].
-    /// 
-    pub fn new_check<'a, K, I>(inputs: &[&str], instructions: I, plaintext_table: HashMap<K, Ptx>) -> Result<Self, usize>
+    ///
+    pub fn new_check<'a, K, I>(
+        inputs: &[&str],
+        instructions: I,
+        plaintext_table: HashMap<K, Ptx>,
+    ) -> Result<Self, usize>
     where
         I: IntoIterator<Item = Instruction<'a>>,
         K: Borrow<str>,
@@ -278,7 +294,7 @@ impl<Ptx> Program<Ptx> {
     /// Returns the list of instructions that form the body of the program.
     ///
     /// # Panics
-    /// 
+    ///
     /// This function does resolve constants, so in particular will panic on invalid programs
     /// that don't have data available for every constant. If this is not desired, use
     /// [`Program::instructions()`] instead.
@@ -338,7 +354,7 @@ impl<Ptx> Program<Ptx> {
     ///
     /// In case of an error, the line number in which the error occured (assuming the program
     /// is formatted in the default way) is returned as [`Result::Err`].
-    /// 
+    ///
     pub fn check(&self) -> Result<(), usize> {
         self.check_impl(|_| Ok(()))
     }
@@ -410,37 +426,55 @@ impl GenericInstruction<usize, usize> {
         let is_initialized = |x: &usize| defined_identifiers.contains(x);
         let has_data = |x: &usize| data_table.contains_key(x);
         if match self {
-            AddCtxCtx { out, lhs: in1, rhs: in2 } => {
+            AddCtxCtx {
+                out,
+                lhs: in1,
+                rhs: in2,
+            } => {
                 is_variable_name(out)
                     && is_variable_name(in1)
                     && is_variable_name(in2)
                     && is_initialized(in1)
                     && is_initialized(in2)
             }
-            AddPtxCtx { out, value: in1, plaintext: in2 } => {
+            AddPtxCtx {
+                out,
+                value: in1,
+                plaintext: in2,
+            } => {
                 is_variable_name(out)
                     && is_variable_name(in1)
                     && is_constant_name(in2)
                     && is_initialized(in1)
                     && has_data(in2)
             }
-            MulCtxCtx { out, lhs: in1, rhs: in2 } => {
+            MulCtxCtx {
+                out,
+                lhs: in1,
+                rhs: in2,
+            } => {
                 is_variable_name(out)
                     && is_variable_name(in1)
                     && is_variable_name(in2)
                     && is_initialized(in1)
                     && is_initialized(in2)
             }
-            MulPtxCtx { out, value: in1, plaintext: in2 } => {
+            MulPtxCtx {
+                out,
+                value: in1,
+                plaintext: in2,
+            } => {
                 is_variable_name(out)
                     && is_variable_name(in1)
                     && is_constant_name(in2)
                     && is_initialized(in1)
                     && has_data(in2)
             }
-            MulIntCtx { out, value: in1, integer: _ } => {
-                is_variable_name(out) && is_variable_name(in1) && is_initialized(in1)
-            }
+            MulIntCtx {
+                out,
+                value: in1,
+                integer: _,
+            } => is_variable_name(out) && is_variable_name(in1) && is_initialized(in1),
             Return { val } => is_variable_name(val) && is_initialized(val),
             Copy { out, val: in1 } => {
                 is_variable_name(out) && is_variable_name(in1) && is_initialized(in1)
@@ -457,7 +491,11 @@ impl GenericInstruction<usize, usize> {
                     && out.len() == exponents.len()
                     && exponents.len() > 0
             }
-            InnerProduct { out, values: in1, coefficients: in2 } => {
+            InnerProduct {
+                out,
+                values: in1,
+                coefficients: in2,
+            } => {
                 is_variable_name(out)
                     && in1
                         .iter()
@@ -552,11 +590,31 @@ impl<Ident: Display, Ptx: Display> Display for GenericInstruction<Ident, Ptx> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use GenericInstruction::*;
         match self {
-            AddCtxCtx { out, lhs: in1, rhs: in2 } => write!(f, "{} = add {}, {}", out, in1, in2),
-            AddPtxCtx { out, value: in1, plaintext: in2 } => write!(f, "{} = add_ptx {}, {}", out, in1, in2),
-            MulCtxCtx { out, lhs: in1, rhs: in2 } => write!(f, "{} = mul {}, {}", out, in1, in2),
-            MulPtxCtx { out, value: in1, plaintext: in2 } => write!(f, "{} = mul_ptx {}, {}", out, in1, in2),
-            MulIntCtx { out, value: in1, integer: in2 } => write!(f, "{} = mul_int {}, {}", out, in1, in2),
+            AddCtxCtx {
+                out,
+                lhs: in1,
+                rhs: in2,
+            } => write!(f, "{} = add {}, {}", out, in1, in2),
+            AddPtxCtx {
+                out,
+                value: in1,
+                plaintext: in2,
+            } => write!(f, "{} = add_ptx {}, {}", out, in1, in2),
+            MulCtxCtx {
+                out,
+                lhs: in1,
+                rhs: in2,
+            } => write!(f, "{} = mul {}, {}", out, in1, in2),
+            MulPtxCtx {
+                out,
+                value: in1,
+                plaintext: in2,
+            } => write!(f, "{} = mul_ptx {}, {}", out, in1, in2),
+            MulIntCtx {
+                out,
+                value: in1,
+                integer: in2,
+            } => write!(f, "{} = mul_int {}, {}", out, in1, in2),
             Return { val } => write!(f, "return {}", val),
             Copy { out, val: in1 } => write!(f, "{} = copy {}", out, in1),
             Zero { out } => write!(f, "{} = zero", out),
@@ -574,7 +632,11 @@ impl<Ident: Display, Ptx: Display> Display for GenericInstruction<Ident, Ptx> {
                 }
                 write!(f, " = galois {}, exponents = {:?}", in1, exponents)
             }
-            InnerProduct { out, values: in1, coefficients: in2 } => {
+            InnerProduct {
+                out,
+                values: in1,
+                coefficients: in2,
+            } => {
                 write!(f, "{} = inner_prod ", out)?;
                 for input in in1 {
                     write!(f, "{}, ", input)?;
@@ -606,27 +668,47 @@ impl<Ident, Ptx> GenericInstruction<Ident, Ptx> {
     {
         use GenericInstruction::*;
         match self {
-            AddCtxCtx { out, lhs: in1, rhs: in2 } => AddCtxCtx {
+            AddCtxCtx {
+                out,
+                lhs: in1,
+                rhs: in2,
+            } => AddCtxCtx {
                 out: f(out),
                 lhs: f(in1),
                 rhs: f(in2),
             },
-            AddPtxCtx { out, value: in1, plaintext: in2 } => AddPtxCtx {
+            AddPtxCtx {
+                out,
+                value: in1,
+                plaintext: in2,
+            } => AddPtxCtx {
                 out: f(out),
                 value: f(in1),
                 plaintext: in2,
             },
-            MulCtxCtx { out, lhs: in1, rhs: in2 } => MulCtxCtx {
+            MulCtxCtx {
+                out,
+                lhs: in1,
+                rhs: in2,
+            } => MulCtxCtx {
                 out: f(out),
                 lhs: f(in1),
                 rhs: f(in2),
             },
-            MulPtxCtx { out, value: in1, plaintext: in2 } => MulPtxCtx {
+            MulPtxCtx {
+                out,
+                value: in1,
+                plaintext: in2,
+            } => MulPtxCtx {
                 out: f(out),
                 value: f(in1),
                 plaintext: in2,
             },
-            MulIntCtx { out, value: in1, integer: in2 } => MulIntCtx {
+            MulIntCtx {
+                out,
+                value: in1,
+                integer: in2,
+            } => MulIntCtx {
                 out: f(out),
                 value: f(in1),
                 integer: in2,
@@ -646,7 +728,11 @@ impl<Ident, Ptx> GenericInstruction<Ident, Ptx> {
                 exponents,
             },
             Return { val } => Return { val: f(val) },
-            InnerProduct { out, values: in1, coefficients: in2 } => InnerProduct {
+            InnerProduct {
+                out,
+                values: in1,
+                coefficients: in2,
+            } => InnerProduct {
                 out: f(out),
                 values: in1.into_iter().map(&mut *f).collect(),
                 coefficients: in2,
@@ -660,27 +746,47 @@ impl<Ident, Ptx> GenericInstruction<Ident, Ptx> {
     {
         use GenericInstruction::*;
         match self {
-            AddCtxCtx { out, lhs: in1, rhs: in2 } => AddCtxCtx {
+            AddCtxCtx {
+                out,
+                lhs: in1,
+                rhs: in2,
+            } => AddCtxCtx {
                 out: out,
                 lhs: in1,
                 rhs: in2,
             },
-            AddPtxCtx { out, value: in1, plaintext: in2 } => AddPtxCtx {
+            AddPtxCtx {
+                out,
+                value: in1,
+                plaintext: in2,
+            } => AddPtxCtx {
                 out: out,
                 value: in1,
                 plaintext: f(in2),
             },
-            MulCtxCtx { out, lhs: in1, rhs: in2 } => MulCtxCtx {
+            MulCtxCtx {
+                out,
+                lhs: in1,
+                rhs: in2,
+            } => MulCtxCtx {
                 out: out,
                 lhs: in1,
                 rhs: in2,
             },
-            MulPtxCtx { out, value: in1, plaintext: in2 } => MulPtxCtx {
+            MulPtxCtx {
+                out,
+                value: in1,
+                plaintext: in2,
+            } => MulPtxCtx {
                 out: out,
                 value: in1,
                 plaintext: f(in2),
             },
-            MulIntCtx { out, value: in1, integer: in2 } => MulIntCtx {
+            MulIntCtx {
+                out,
+                value: in1,
+                integer: in2,
+            } => MulIntCtx {
                 out: out,
                 value: in1,
                 integer: in2,
@@ -697,7 +803,11 @@ impl<Ident, Ptx> GenericInstruction<Ident, Ptx> {
                 exponents,
             },
             Return { val } => Return { val: val },
-            InnerProduct { out, values: in1, coefficients: in2 } => InnerProduct {
+            InnerProduct {
+                out,
+                values: in1,
+                coefficients: in2,
+            } => InnerProduct {
                 out: out,
                 values: in1,
                 coefficients: in2.into_iter().map(&mut *f).collect(),
@@ -734,7 +844,6 @@ impl From<Vec<i64>> for PlaintextData {
 }
 
 impl From<PlaintextData> for Vec<i64> {
-
     fn from(value: PlaintextData) -> Vec<i64> {
         value.data
     }
