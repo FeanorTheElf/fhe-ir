@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-elsa = "1.11.2"
-selfref = "0.4.3"
+bimap = "0.6.3"
+
+[dev-dependencies]
+oorandom = "11.1.5"
