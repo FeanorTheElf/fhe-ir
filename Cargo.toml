@@ -3,6 +3,17 @@ name = "fhe-ir"
 version = "0.1.0"
 edition = "2024"
 
+repository = "https://github.com/FeanorTheElf/fhe-ir"
+homepage = "https://github.com/FeanorTheElf/fhe-ir"
+keywords = ["cryptography", "encryption", "fhe", "homomorphic", "intermediate-representation", "ir"]
+readme = "Readme.md"
+description = "A minimalistic IR for scheme-agnostic FHE circuits"
+license = "MIT"
+
+[lib]
+crate-type = ["rlib"]
+bench = true
+
 [dependencies]
 bimap = "0.6.3"
 

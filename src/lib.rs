@@ -204,7 +204,8 @@ impl<Ptx> Program<Ptx> {
     ///  - `plaintext_table` is maps the identifiers used for constants in the program
     ///    body to the actual data
     ///
-    /// This does not perform any checks beyond syntactic well-formedness.
+    /// This does not perform any checks beyond syntactic well-formedness. Use [`Program::new_check()`]
+    /// as a shorthand for creating and checking the program.
     ///
     pub fn new<'a, K, I>(inputs: &[&str], instructions: I, plaintext_table: HashMap<K, Ptx>) -> Self
     where
@@ -225,7 +226,7 @@ impl<Ptx> Program<Ptx> {
             .collect();
         let plaintext_table = plaintext_table
             .into_iter()
-            .map(|(k, v)| (ident_table.get_by_name(k.borrow()), v))
+            .map(|(k, v)| (ident_table.ident_by_name(k.borrow()), v))
             .collect();
         return Self {
             identifier_table: ident_table,
@@ -233,6 +234,19 @@ impl<Ptx> Program<Ptx> {
             instructions: instructions,
             plaintext_table: plaintext_table,
         };
+    }
+
+    ///
+    /// Shorthand for [`Program::new()`] followed by [`Program::check()`].
+    /// 
+    pub fn new_check<'a, K, I>(inputs: &[&str], instructions: I, plaintext_table: HashMap<K, Ptx>) -> Result<Self, usize>
+    where
+        I: IntoIterator<Item = Instruction<'a>>,
+        K: Borrow<str>,
+    {
+        let result = Program::new(inputs, instructions, plaintext_table);
+        result.check()?;
+        return Ok(result);
     }
 
     ///
@@ -769,7 +783,7 @@ fn parse_leading_identifier(data: &str, table: &mut IdentifierTable) -> Option<(
     let idx = data
         .chars()
         .skip(1)
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
         .count();
     if idx > 0 {
         Some((table.ident_by_name(&data[..(idx + 1)]), idx + 1))
@@ -799,12 +813,12 @@ fn expect_ident<'a>(s: &mut &'a str, table: &mut IdentifierTable) -> Option<usiz
 fn expect_int<'a>(s: &mut &'a str) -> Option<i64> {
     let idx = s
         .chars()
-        .take_while(|c| *c == '-' || c.is_numeric())
+        .take_while(|c| *c == '-' || c.is_ascii_digit())
         .count();
     if idx > 0 {
-        let result = i64::from_str(&s[..idx]).ok();
+        let result = i64::from_str(&s[..idx]).ok()?;
         *s = &s[idx..];
-        return result;
+        return Some(result);
     } else {
         return None;
     }
