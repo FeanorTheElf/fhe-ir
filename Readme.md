@@ -15,6 +15,7 @@ Non-Features:
  - It doesn't have any scheme-specific operations like modulus-switching, exact division or plaintext-as-ciphertext reinterpretation
  - It doesn't contain an interpreter
  - It doesn't know about finite fields, and stores data as integers; host code will have to ensure that programs are generated and used with the same rings and FHE parameters
+ - While MLIR-inspired, this doesn't use SSA; An instruction like `%x = add %x, %y` is allowed and intended
 
 # Example
 
