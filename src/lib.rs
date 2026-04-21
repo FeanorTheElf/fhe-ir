@@ -30,7 +30,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # Example
     /// ```rust
     /// # use fhe_ir::*;
-    /// Program::parse(r#"
+    /// <Program>::parse(r#"
     ///     func(%input1, %input2) {
     ///         %output = add %input1, %input2
     ///         return %output
@@ -43,7 +43,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # Example
     /// ```rust
     /// # use fhe_ir::*;
-    /// Program::parse(r#"
+    /// <Program>::parse(r#"
     ///     func(%input) {
     ///         %output = add_ptx %input, @constant
     ///         return %output
@@ -61,7 +61,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # Example
     /// ```rust
     /// # use fhe_ir::*;
-    /// Program::parse(r#"
+    /// <Program>::parse(r#"
     ///     func(%input1, %input2) {
     ///         %output = mul %input1, %input2
     ///         return %output
@@ -74,7 +74,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # Example
     /// ```rust
     /// # use fhe_ir::*;
-    /// Program::parse(r#"
+    /// <Program>::parse(r#"
     ///     func(%input) {
     ///         %output = mul_ptx %input, @constant
     ///         return %output
@@ -92,7 +92,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # Example
     /// ```rust
     /// # use fhe_ir::*;
-    /// Program::parse(r#"
+    /// <Program>::parse(r#"
     ///     func(%input) {
     ///         %output = mul_int %input, 42
     ///         return %output
@@ -109,7 +109,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # Example
     /// ```rust
     /// # use fhe_ir::*;
-    /// Program::parse(r#"
+    /// <Program>::parse(r#"
     ///     func(%input) {
     ///         %output = copy %input
     ///         return %output
@@ -122,7 +122,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # Example
     /// ```rust
     /// # use fhe_ir::*;
-    /// Program::parse(r#"
+    /// <Program>::parse(r#"
     ///     func() {
     ///         %output = zero
     ///         return %output
@@ -135,7 +135,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # Example
     /// ```rust
     /// # use fhe_ir::*;
-    /// Program::parse(r#"
+    /// <Program>::parse(r#"
     ///     func(%in_out_put) {
     ///         return %in_out_put
     ///     }
@@ -147,7 +147,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # Example
     /// ```rust
     /// # use fhe_ir::*;
-    /// Program::parse(r#"
+    /// <Program>::parse(r#"
     ///     func(%input) {
     ///         %output1, %output2, %output3 = galois %input, exponents = [1, 5, -1]
     ///         return %output1
@@ -166,7 +166,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # Example
     /// ```rust
     /// # use fhe_ir::*;
-    /// Program::parse(r#"
+    /// <Program>::parse(r#"
     ///     func(%input1, %input2, %input3) {
     ///         %output = inner_prod %input1, %input2, %input3, coefficients = [@coeff1, @coeff2, @coeff3]
     ///         return %output
@@ -379,7 +379,7 @@ impl<Ptx> Program<Ptx> {
     }
 }
 
-impl Program {
+impl<Ptx: FromStr> Program<Ptx> {
     ///
     /// Parses a string into a [`Program`]. This is compatible with the [`Display`]
     /// implementation for [`Program`].
@@ -389,18 +389,7 @@ impl Program {
     /// [`Result::Err`].
     ///
     pub fn parse<R: Read>(data: R) -> Result<Self, usize> {
-        Self::parse_impl(data, |mut s| {
-            let mut data = Vec::new();
-            expect(&mut s, "[")?;
-            if let Some(val) = expect_int(&mut s) {
-                data.push(val);
-                while let Some(()) = expect(&mut s, ", ") {
-                    data.push(expect_int(&mut s)?);
-                }
-            }
-            expect(&mut s, "]")?;
-            expect_end(s, PlaintextData::from(data))
-        })
+        Self::parse_impl(data, |s| Ptx::from_str(s).map_err(|_| ()))
     }
 
     ///
@@ -849,6 +838,24 @@ impl From<PlaintextData> for Vec<i64> {
     }
 }
 
+impl FromStr for PlaintextData {
+
+    type Err = ();
+    
+    fn from_str(mut s: &str) -> Result<Self, Self::Err> {
+        let mut data = Vec::new();
+        expect(&mut s, "[").ok_or(())?;
+        if let Some(val) = expect_int(&mut s) {
+            data.push(val);
+            while let Some(()) = expect(&mut s, ", ") {
+                data.push(expect_int(&mut s).ok_or(())?);
+            }
+        }
+        expect(&mut s, "]").ok_or(())?;
+        expect_end(s, PlaintextData::from(data)).ok_or(())
+    }
+}
+
 impl Deref for PlaintextData {
     type Target = Vec<i64>;
 
@@ -1101,7 +1108,7 @@ impl GenericInstruction<usize, usize> {
 }
 
 impl<Ptx> Program<Ptx> {
-    fn parse_impl<F: FnMut(&str) -> Option<Ptx>, R: Read>(
+    fn parse_impl<F: FnMut(&str) -> Result<Ptx, ()>, R: Read>(
         data: R,
         mut parse_ptx: F,
     ) -> Result<Self, usize> {
@@ -1153,7 +1160,7 @@ impl<Ptx> Program<Ptx> {
             let mut s = line.as_str().trim();
             let name = expect_ident(&mut s, &mut result.identifier_table).ok_or(line_num)?;
             expect(&mut s, ": ").ok_or(line_num)?;
-            let data = parse_ptx(s).ok_or(line_num)?;
+            let data = parse_ptx(s).map_err(|()| line_num)?;
             if result.plaintext_table.contains_key(&name) {
                 Err(line_num)?;
             } else {

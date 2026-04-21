@@ -21,7 +21,7 @@ Non-Features:
 
 ```rust
 # use fhe_ir::*;
-let program = Program::parse_check(r#"
+let program = <Program>::parse_check(r#"
     func(%x) {
         %x1, %x2, %x3, %x4 = galois %x, exponents = [1, 5, -1, -5]
         %result = inner_prod %x1, %x2, %x3, %x4, coefficients = [@c1, @c2, @c3, @c4]
