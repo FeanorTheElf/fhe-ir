@@ -7,16 +7,17 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::io::{BufRead, BufReader, Read};
 use std::ops::{Deref, DerefMut};
+use std::slice::{self, from_ref};
 use std::str::FromStr;
 
 use bimap::BiMap;
 
 ///
-/// Wrapper around `Vec<i64>`, to be used to store plaintext elements.
+/// Wrapper around `Vec<T>`, to be used to load and store lists of values.
 ///
 #[derive(Clone, PartialEq, Eq)]
-pub struct PlaintextData {
-    data: Vec<i64>,
+pub struct ValueList<T = i64> {
+    data: Vec<T>,
 }
 
 ///
@@ -199,8 +200,8 @@ pub type InstructionWithData<'a, Ptx> = GenericInstruction<&'a str, &'a Ptx>;
 /// formed by instructions, and a table mapping constants to their underlying
 /// data.
 ///
-#[derive(Clone, PartialEq, Eq)]
-pub struct Program<Ptx = PlaintextData> {
+#[derive(Clone)]
+pub struct Program<Ptx = ValueList> {
     identifier_table: IdentifierTable,
     plaintext_table: HashMap<usize, Ptx>,
     inputs: Vec<usize>,
@@ -379,6 +380,39 @@ impl<Ptx> Program<Ptx> {
     }
 }
 
+impl<Ptx: Eq + Display> PartialEq for Program<Ptx> {
+
+    fn eq(&self, other: &Self) -> bool {
+        if self.inputs.len() != other.inputs.len() {
+            return false;
+        }
+        if self.instructions.len() != other.instructions.len() {
+            return false;
+        }
+        for (self_input, other_input) in self.inputs().zip(other.inputs()) {
+            if self_input != other_input {
+                return false;
+            }
+        }
+        let mut check_tuples = Vec::new();
+        for (self_inst, other_inst) in self.instructions.iter().zip(other.instructions.iter()) {
+            if self_inst.clone().map_identifiers(&mut |idx| self.identifier_table.get(idx)) != other_inst.clone().map_identifiers(&mut |idx| other.identifier_table.get(idx)) {
+                return false;
+            }
+            assert_eq!(self_inst.get_ptxs().len(), other_inst.get_ptxs().len());
+            check_tuples.extend(self_inst.get_ptxs().copied().zip(other_inst.get_ptxs().copied()));
+        }
+        check_tuples.sort_unstable();
+        check_tuples.dedup();
+        for (self_i, other_i) in check_tuples {
+            if self.plaintext_table.get(&self_i) != other.plaintext_table.get(&other_i) {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
 impl<Ptx: FromStr> Program<Ptx> {
     ///
     /// Parses a string into a [`Program`]. This is compatible with the [`Display`]
@@ -544,7 +578,7 @@ impl GenericInstruction<usize, usize> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 struct IdentifierTable {
     counter: usize,
     mapping: BiMap<usize, String>,
@@ -651,6 +685,28 @@ impl<Ident: Display, Ptx: Display> Debug for GenericInstruction<Ident, Ptx> {
 }
 
 impl<Ident, Ptx> GenericInstruction<Ident, Ptx> {
+    fn get_ptxs<'a>(&'a self) -> slice::Iter<'a, Ptx> {
+        use GenericInstruction::*;
+        match self {
+            AddPtxCtx {
+                out: _,
+                value: _,
+                plaintext: in2,
+            } => from_ref(in2).iter(),
+            MulPtxCtx {
+                out: _,
+                value: _,
+                plaintext: in2,
+            } => from_ref(in2).iter(),
+            InnerProduct {
+                out: _,
+                values: _,
+                coefficients: in2,
+            } => in2.iter(),
+            _ => [].iter()
+        }
+    }
+
     fn map_nonptx_identifiers<NewIdent, F>(self, f: &mut F) -> GenericInstruction<NewIdent, Ptx>
     where
         F: FnMut(Ident) -> NewIdent,
@@ -814,57 +870,72 @@ impl<Ident> GenericInstruction<Ident> {
     }
 }
 
-impl Display for PlaintextData {
+impl<T: Display> Display for ValueList<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.data)
+        write!(f, "[")?;
+        let mut it = self.data.iter();
+        if let Some(val) = it.next() {
+            write!(f, "{}", val)?;
+        }
+        while let Some(val) = it.next() {
+            write!(f, ", {}", val)?;
+        }
+        write!(f, "]")?;
+        return Ok(());
     }
 }
 
-impl Debug for PlaintextData {
+impl<T: Display> Debug for ValueList<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self)
     }
 }
 
-impl From<Vec<i64>> for PlaintextData {
-    fn from(value: Vec<i64>) -> Self {
+impl<T> From<Vec<T>> for ValueList<T> {
+    fn from(value: Vec<T>) -> Self {
         Self { data: value }
     }
 }
 
-impl From<PlaintextData> for Vec<i64> {
-    fn from(value: PlaintextData) -> Vec<i64> {
+impl<T> From<ValueList<T>> for Vec<T> {
+    fn from(value: ValueList<T>) -> Vec<T> {
         value.data
     }
 }
 
-impl FromStr for PlaintextData {
+impl<T: FromStr> FromStr for ValueList<T> {
 
     type Err = ();
     
     fn from_str(mut s: &str) -> Result<Self, Self::Err> {
-        let mut data = Vec::new();
-        expect(&mut s, "[").ok_or(())?;
-        if let Some(val) = expect_int(&mut s) {
-            data.push(val);
-            while let Some(()) = expect(&mut s, ", ") {
-                data.push(expect_int(&mut s).ok_or(())?);
-            }
+        s = s.trim();
+        if !s.starts_with("[") {
+            return Err(());
+        } else {
+            s = &s[1..];
         }
-        expect(&mut s, "]").ok_or(())?;
-        expect_end(s, PlaintextData::from(data)).ok_or(())
+        if !s.ends_with("]") {
+            return Err(());
+        } else {
+            s = &s[..(s.len() - 1)];
+        }
+        if s == "" {
+            Ok(Self::from(Vec::new()))
+        } else {
+            Ok(Self::from(s.split(", ").map(|val| T::from_str(val)).collect::<Result<Vec<_>, _>>().map_err(|_| ())?))
+        }
     }
 }
 
-impl Deref for PlaintextData {
-    type Target = Vec<i64>;
+impl<T> Deref for ValueList<T> {
+    type Target = Vec<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.data
     }
 }
 
-impl DerefMut for PlaintextData {
+impl<T> DerefMut for ValueList<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.data
     }
@@ -1308,11 +1379,11 @@ fn test_display_parse_with_data() {
         [
             (
                 "@x".to_owned(),
-                PlaintextData::from(vec![1, 2, 3, 4, 5, 6, 7, 8]),
+                ValueList::from(vec![1, 2, 3, 4, 5, 6, 7, 8]),
             ),
             (
                 "@y".to_owned(),
-                PlaintextData::from(vec![2, 3, 4, 5, 6, 7, 8, 9]),
+                ValueList::from(vec![2, 3, 4, 5, 6, 7, 8, 9]),
             ),
         ]
         .into_iter()
