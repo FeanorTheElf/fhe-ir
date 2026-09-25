@@ -1,6 +1,6 @@
 [package]
 name = "fhe-ir"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2024"
 
 repository = "https://github.com/FeanorTheElf/fhe-ir"
@@ -9,6 +9,7 @@ keywords = ["cryptography", "fhe", "ir"]
 readme = "Readme.md"
 description = "A minimalistic IR for scheme-agnostic FHE circuits"
 license = "MIT"
+exclude = [".vscode"]
 
 [lib]
 crate-type = ["rlib"]

@@ -24,13 +24,12 @@ Non-Features:
 let program = <Program>::parse_check(r#"
     func(%x) {
         %x1, %x2, %x3, %x4 = galois %x, exponents = [1, 5, -1, -5]
-        %result = inner_prod %x1, %x2, %x3, %x4, coefficients = [@c1, @c2, @c3, @c4]
+        %result = inner_prod %x1, %x2, %x3, %x4, coefficients = [@c1, @c2, @c3, 42]
         return %result
     }
     @c1: []
     @c2: []
     @c3: []
-    @c4: []
 "#.as_bytes()).unwrap();
 
 for inst in program.instructions_with_data() {
@@ -39,3 +38,7 @@ for inst in program.instructions_with_data() {
     }
 }
 ```
+
+# Release notes
+
+ - in `2.0.0` the handling of integer constants changed; instead of an explicit instruction `mul_int`, all of `add_ptx`, `mul_ptx`, `inner_prod` now support integer operands in addition to constants `@constant`.

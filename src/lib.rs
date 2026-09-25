@@ -16,15 +16,31 @@ use bimap::BiMap;
 /// Wrapper around `Vec<T>`, to be used to load and store lists of values.
 ///
 #[derive(Clone, PartialEq, Eq)]
-pub struct ValueList<T = i64> {
+pub struct ValueList<T = i128> {
     data: Vec<T>,
+}
+
+///
+/// Represents a plaintext argument, which is either an integer or of the configured
+/// generic plaintext type.
+///
+/// While it is always possible to use a plaintext type `Ptx` that can also store
+/// integers, the additional indirection usually makes the resulting programs much
+/// less readable than necessary.
+///
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum IntOrPtx<Ptx> {
+    /// The plaintext is an integer.
+    Int(i64),
+    /// The plaintext is a generic plaintext as given by `Ptx`.
+    Ptx(Ptx),
 }
 
 ///
 /// An FHE-IR instruction.
 ///
-#[derive(Clone, PartialEq, Eq, Hash)]
 #[allow(missing_docs)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// Ciphertext-ciphertext addition.
     ///
@@ -46,8 +62,10 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # use fhe_ir::*;
     /// <Program>::parse(r#"
     ///     func(%input) {
-    ///         %output = add_ptx %input, @constant
-    ///         return %output
+    ///         %add_const = add_ptx %input, @constant
+    ///         %add_int = add_ptx %input, 3
+    ///         return %add_const
+    ///         return %add_int
     ///     }
     ///     @constant: [1, 2, 3, 4]
     /// "#.as_bytes()).unwrap().check().unwrap();
@@ -55,7 +73,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     AddPtxCtx {
         out: Ident,
         value: Ident,
-        plaintext: Ptx,
+        plaintext: IntOrPtx<Ptx>,
     },
     /// Ciphertext-ciphertext multiplication.
     ///
@@ -77,8 +95,10 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # use fhe_ir::*;
     /// <Program>::parse(r#"
     ///     func(%input) {
-    ///         %output = mul_ptx %input, @constant
-    ///         return %output
+    ///         %mul_const = mul_ptx %input, @constant
+    ///         %mul_int = mul_ptx %input, 3
+    ///         return %mul_const
+    ///         return %mul_int
     ///     }
     ///     @constant: [1, 2, 3, 4]
     /// "#.as_bytes()).unwrap().check().unwrap();
@@ -86,24 +106,7 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     MulPtxCtx {
         out: Ident,
         value: Ident,
-        plaintext: Ptx,
-    },
-    /// Integer-ciphertext multiplication.
-    ///
-    /// # Example
-    /// ```rust
-    /// # use fhe_ir::*;
-    /// <Program>::parse(r#"
-    ///     func(%input) {
-    ///         %output = mul_int %input, 42
-    ///         return %output
-    ///     }
-    /// "#.as_bytes()).unwrap().check().unwrap();
-    /// ```
-    MulIntCtx {
-        out: Ident,
-        value: Ident,
-        integer: i64,
+        plaintext: IntOrPtx<Ptx>,
     },
     /// Create a copy of a ciphertext.
     ///
@@ -169,18 +172,17 @@ pub enum GenericInstruction<Ident = usize, Ptx = Ident> {
     /// # use fhe_ir::*;
     /// <Program>::parse(r#"
     ///     func(%input1, %input2, %input3) {
-    ///         %output = inner_prod %input1, %input2, %input3, coefficients = [@coeff1, @coeff2, @coeff3]
+    ///         %output = inner_prod %input1, %input2, %input3, coefficients = [@coeff1, @coeff2, 42]
     ///         return %output
     ///     }
     ///     @coeff1: [2, 3]
     ///     @coeff2: [5, 7]
-    ///     @coeff3: [4, 9]
     /// "#.as_bytes()).unwrap().check().unwrap();
     /// ```
     InnerProduct {
         out: Ident,
         values: Vec<Ident>,
-        coefficients: Vec<Ptx>,
+        coefficients: Vec<IntOrPtx<Ptx>>,
     },
 }
 
@@ -306,7 +308,10 @@ impl<Ptx> Program<Ptx> {
         self.instructions.iter().map(|inst| {
             inst.clone()
                 .map_nonptx_identifiers(&mut |idx| self.identifier_table.get(idx))
-                .map_ptx(&mut |key| self.plaintext_table.get(&key).unwrap())
+                .map_ptx(&mut |key| match key {
+                    IntOrPtx::Int(x) => IntOrPtx::Int(x),
+                    IntOrPtx::Ptx(key) => IntOrPtx::Ptx(self.plaintext_table.get(&key).unwrap()),
+                })
         })
     }
 
@@ -381,7 +386,6 @@ impl<Ptx> Program<Ptx> {
 }
 
 impl<Ptx: Eq + Display> PartialEq for Program<Ptx> {
-
     fn eq(&self, other: &Self) -> bool {
         if self.inputs.len() != other.inputs.len() {
             return false;
@@ -396,16 +400,33 @@ impl<Ptx: Eq + Display> PartialEq for Program<Ptx> {
         }
         let mut check_tuples = Vec::new();
         for (self_inst, other_inst) in self.instructions.iter().zip(other.instructions.iter()) {
-            if self_inst.clone().map_identifiers(&mut |idx| self.identifier_table.get(idx)) != other_inst.clone().map_identifiers(&mut |idx| other.identifier_table.get(idx)) {
+            if self_inst
+                .clone()
+                .map_identifiers(&mut |idx| self.identifier_table.get(idx))
+                != other_inst
+                    .clone()
+                    .map_identifiers(&mut |idx| other.identifier_table.get(idx))
+            {
                 return false;
             }
             assert_eq!(self_inst.get_ptxs().len(), other_inst.get_ptxs().len());
-            check_tuples.extend(self_inst.get_ptxs().copied().zip(other_inst.get_ptxs().copied()));
+            check_tuples.extend(
+                self_inst
+                    .get_ptxs()
+                    .copied()
+                    .zip(other_inst.get_ptxs().copied()),
+            );
         }
         check_tuples.sort_unstable();
         check_tuples.dedup();
-        for (self_i, other_i) in check_tuples {
-            if self.plaintext_table.get(&self_i) != other.plaintext_table.get(&other_i) {
+        for (self_ptx, other_ptx) in check_tuples {
+            if match (self_ptx, other_ptx) {
+                (IntOrPtx::Int(self_int), IntOrPtx::Int(other_int)) => self_int != other_int,
+                (IntOrPtx::Ptx(self_i), IntOrPtx::Ptx(other_i)) => {
+                    self.plaintext_table.get(&self_i) != other.plaintext_table.get(&other_i)
+                }
+                _ => true,
+            } {
                 return false;
             }
         }
@@ -467,9 +488,12 @@ impl GenericInstruction<usize, usize> {
             } => {
                 is_variable_name(out)
                     && is_variable_name(in1)
-                    && is_constant_name(in2)
                     && is_initialized(in1)
-                    && has_data(in2)
+                    && if let IntOrPtx::Ptx(in2) = in2 {
+                        is_constant_name(in2) && has_data(in2)
+                    } else {
+                        true
+                    }
             }
             MulCtxCtx {
                 out,
@@ -489,15 +513,13 @@ impl GenericInstruction<usize, usize> {
             } => {
                 is_variable_name(out)
                     && is_variable_name(in1)
-                    && is_constant_name(in2)
                     && is_initialized(in1)
-                    && has_data(in2)
+                    && if let IntOrPtx::Ptx(in2) = in2 {
+                        is_constant_name(in2) && has_data(in2)
+                    } else {
+                        true
+                    }
             }
-            MulIntCtx {
-                out,
-                value: in1,
-                integer: _,
-            } => is_variable_name(out) && is_variable_name(in1) && is_initialized(in1),
             Return { val } => is_variable_name(val) && is_initialized(val),
             Copy { out, val: in1 } => {
                 is_variable_name(out) && is_variable_name(in1) && is_initialized(in1)
@@ -523,7 +545,13 @@ impl GenericInstruction<usize, usize> {
                     && in1
                         .iter()
                         .all(|in1| is_variable_name(in1) && is_initialized(in1))
-                    && in2.iter().all(|in2| is_constant_name(in2) && has_data(in2))
+                    && in2.iter().all(|in2| {
+                        if let IntOrPtx::Ptx(in2) = in2 {
+                            is_constant_name(in2) && has_data(in2)
+                        } else {
+                            true
+                        }
+                    })
                     && in1.len() == in2.len()
             }
         } {
@@ -547,11 +575,6 @@ impl GenericInstruction<usize, usize> {
                     out,
                     value: _,
                     plaintext: _,
-                }
-                | MulIntCtx {
-                    out,
-                    value: _,
-                    integer: _,
                 }
                 | Copy { out, val: _ }
                 | Zero { out }
@@ -609,6 +632,24 @@ impl IdentifierTable {
     }
 }
 
+impl<Ptx: Display> Display for IntOrPtx<Ptx> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntOrPtx::Int(int) => write!(f, "{}", int),
+            IntOrPtx::Ptx(ptx) => write!(f, "{}", ptx),
+        }
+    }
+}
+
+impl<Ptx: Debug> Debug for IntOrPtx<Ptx> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntOrPtx::Int(int) => write!(f, "{}", int),
+            IntOrPtx::Ptx(ptx) => write!(f, "{:?}", ptx),
+        }
+    }
+}
+
 impl<Ident: Display, Ptx: Display> Display for GenericInstruction<Ident, Ptx> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use GenericInstruction::*;
@@ -633,11 +674,6 @@ impl<Ident: Display, Ptx: Display> Display for GenericInstruction<Ident, Ptx> {
                 value: in1,
                 plaintext: in2,
             } => write!(f, "{} = mul_ptx {}, {}", out, in1, in2),
-            MulIntCtx {
-                out,
-                value: in1,
-                integer: in2,
-            } => write!(f, "{} = mul_int {}, {}", out, in1, in2),
             Return { val } => write!(f, "return {}", val),
             Copy { out, val: in1 } => write!(f, "{} = copy {}", out, in1),
             Zero { out } => write!(f, "{} = zero", out),
@@ -685,7 +721,7 @@ impl<Ident: Display, Ptx: Display> Debug for GenericInstruction<Ident, Ptx> {
 }
 
 impl<Ident, Ptx> GenericInstruction<Ident, Ptx> {
-    fn get_ptxs<'a>(&'a self) -> slice::Iter<'a, Ptx> {
+    fn get_ptxs<'a>(&'a self) -> slice::Iter<'a, IntOrPtx<Ptx>> {
         use GenericInstruction::*;
         match self {
             AddPtxCtx {
@@ -703,7 +739,7 @@ impl<Ident, Ptx> GenericInstruction<Ident, Ptx> {
                 values: _,
                 coefficients: in2,
             } => in2.iter(),
-            _ => [].iter()
+            _ => [].iter(),
         }
     }
 
@@ -749,15 +785,6 @@ impl<Ident, Ptx> GenericInstruction<Ident, Ptx> {
                 value: f(in1),
                 plaintext: in2,
             },
-            MulIntCtx {
-                out,
-                value: in1,
-                integer: in2,
-            } => MulIntCtx {
-                out: f(out),
-                value: f(in1),
-                integer: in2,
-            },
             Zero { out } => Zero { out: f(out) },
             Copy { out, val: in1 } => Copy {
                 out: f(out),
@@ -787,7 +814,7 @@ impl<Ident, Ptx> GenericInstruction<Ident, Ptx> {
 
     fn map_ptx<NewPtx, F>(self, f: &mut F) -> GenericInstruction<Ident, NewPtx>
     where
-        F: FnMut(Ptx) -> NewPtx,
+        F: FnMut(IntOrPtx<Ptx>) -> IntOrPtx<NewPtx>,
     {
         use GenericInstruction::*;
         match self {
@@ -827,15 +854,6 @@ impl<Ident, Ptx> GenericInstruction<Ident, Ptx> {
                 value: in1,
                 plaintext: f(in2),
             },
-            MulIntCtx {
-                out,
-                value: in1,
-                integer: in2,
-            } => MulIntCtx {
-                out: out,
-                value: in1,
-                integer: in2,
-            },
             Zero { out } => Zero { out: out },
             Copy { out, val: in1 } => Copy { out: out, val: in1 },
             Galois {
@@ -866,7 +884,11 @@ impl<Ident> GenericInstruction<Ident> {
     where
         F: FnMut(Ident) -> NewIdent,
     {
-        self.map_nonptx_identifiers(f).map_ptx(f)
+        self.map_nonptx_identifiers(f)
+            .map_ptx(&mut |ptx| match ptx {
+                IntOrPtx::Int(x) => IntOrPtx::Int(x),
+                IntOrPtx::Ptx(ident) => IntOrPtx::Ptx(f(ident)),
+            })
     }
 }
 
@@ -904,9 +926,8 @@ impl<T> From<ValueList<T>> for Vec<T> {
 }
 
 impl<T: FromStr> FromStr for ValueList<T> {
-
     type Err = ();
-    
+
     fn from_str(mut s: &str) -> Result<Self, Self::Err> {
         s = s.trim();
         if !s.starts_with("[") {
@@ -922,7 +943,12 @@ impl<T: FromStr> FromStr for ValueList<T> {
         if s == "" {
             Ok(Self::from(Vec::new()))
         } else {
-            Ok(Self::from(s.split(", ").map(|val| T::from_str(val)).collect::<Result<Vec<_>, _>>().map_err(|_| ())?))
+            Ok(Self::from(
+                s.split(", ")
+                    .map(|val| T::from_str(val))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| ())?,
+            ))
         }
     }
 }
@@ -1017,6 +1043,18 @@ fn expect_int<'a>(s: &mut &'a str) -> Option<i64> {
     }
 }
 
+fn expect_int_or_ptxident<'a>(
+    s: &mut &'a str,
+    table: &mut IdentifierTable,
+) -> Option<IntOrPtx<usize>> {
+    if let Some((ident, continue_at)) = parse_leading_identifier(*s, table) {
+        *s = &s[continue_at..];
+        return Some(IntOrPtx::Ptx(ident));
+    } else {
+        return expect_int(s).map(|int| IntOrPtx::Int(int));
+    };
+}
+
 fn expect_end<T>(s: &str, result: T) -> Option<T> {
     if s.len() == 0 {
         return Some(result);
@@ -1058,7 +1096,7 @@ impl GenericInstruction<usize, usize> {
         } else if let Some(()) = expect(&mut s, " = add_ptx ") {
             let in1 = expect_ident(&mut s, table)?;
             expect(&mut s, ", ")?;
-            let in2 = expect_ident(&mut s, table)?;
+            let in2 = expect_int_or_ptxident(&mut s, table)?;
             expect_end(
                 s,
                 GenericInstruction::AddPtxCtx {
@@ -1082,25 +1120,13 @@ impl GenericInstruction<usize, usize> {
         } else if let Some(()) = expect(&mut s, " = mul_ptx ") {
             let in1 = expect_ident(&mut s, table)?;
             expect(&mut s, ", ")?;
-            let in2 = expect_ident(&mut s, table)?;
+            let in2 = expect_int_or_ptxident(&mut s, table)?;
             expect_end(
                 s,
                 GenericInstruction::MulPtxCtx {
                     out: expect_single_output()?,
                     value: in1,
                     plaintext: in2,
-                },
-            )
-        } else if let Some(()) = expect(&mut s, " = mul_int ") {
-            let in1 = expect_ident(&mut s, table)?;
-            expect(&mut s, ", ")?;
-            let in2 = expect_int(&mut s)?;
-            expect_end(
-                s,
-                GenericInstruction::MulIntCtx {
-                    out: expect_single_output()?,
-                    value: in1,
-                    integer: in2,
                 },
             )
         } else if let Some(()) = expect(&mut s, " = galois ") {
@@ -1150,10 +1176,10 @@ impl GenericInstruction<usize, usize> {
             }
             expect(&mut s, "coefficients = [")?;
             let mut coefficients = Vec::new();
-            if let Some(coeff) = expect_ident(&mut s, table) {
+            if let Some(coeff) = expect_int_or_ptxident(&mut s, table) {
                 coefficients.push(coeff);
                 while let Some(()) = expect(&mut s, ", ") {
-                    coefficients.push(expect_ident(&mut s, table)?);
+                    coefficients.push(expect_int_or_ptxident(&mut s, table)?);
                 }
             }
             expect(&mut s, "]")?;
@@ -1291,7 +1317,7 @@ fn test_display_parse_no_data() {
             %a = inner_prod %x, %y, %z, coefficients = [@x, @y, @z]
             %b = zero
             %a = add %a, %b
-            %a = mul_int %a, -5
+            %a = mul_ptx %a, -5
             %c0, %c1 = galois %a, exponents = [5, -1]
             return %c0
             %c1 = add_ptx %c1, @c
@@ -1312,7 +1338,11 @@ fn test_display_parse_no_data() {
             Instruction::InnerProduct {
                 out: "%a",
                 values: vec!["%x", "%y", "%z"],
-                coefficients: vec!["@x", "@y", "@z"],
+                coefficients: vec![
+                    IntOrPtx::Ptx("@x"),
+                    IntOrPtx::Ptx("@y"),
+                    IntOrPtx::Ptx("@z"),
+                ],
             },
             Instruction::Zero { out: "%b" },
             Instruction::AddCtxCtx {
@@ -1320,10 +1350,10 @@ fn test_display_parse_no_data() {
                 lhs: "%a",
                 rhs: "%b",
             },
-            Instruction::MulIntCtx {
+            Instruction::MulPtxCtx {
                 out: "%a",
                 value: "%a",
-                integer: -5,
+                plaintext: IntOrPtx::Int(-5),
             },
             Instruction::Galois {
                 out: vec!["%c0", "%c1"],
@@ -1334,7 +1364,7 @@ fn test_display_parse_no_data() {
             Instruction::AddPtxCtx {
                 out: "%c1",
                 value: "%c1",
-                plaintext: "@c",
+                plaintext: IntOrPtx::Ptx("@c"),
             },
             Instruction::Return { val: "%c1" },
         ],
@@ -1372,7 +1402,7 @@ fn test_display_parse_with_data() {
             Instruction::InnerProduct {
                 out: "%z",
                 values: vec!["%x", "%y"],
-                coefficients: vec!["@x", "@y"],
+                coefficients: vec![IntOrPtx::Ptx("@x"), IntOrPtx::Ptx("@y")],
             },
             Instruction::Return { val: "%z" },
         ],
@@ -1454,7 +1484,7 @@ fn random_test_display_parse() {
             4 => {
                 let value = rng.borrow_mut().rand_i64();
                 format!(
-                    "{} = mul_int {}, {}",
+                    "{} = mul_ptx {}, {}",
                     rand_new_ident(existing_idents),
                     rand_existing_ident(existing_idents),
                     value
@@ -1531,7 +1561,7 @@ fn test_check() {
             %a = inner_prod %x, %y, %z, coefficients = [@x, @y, @z]
             %b = zero
             %a = add %a, %b
-            %a = mul_int %a, -5
+            %a = mul_ptx %a, -5
             %c0, %c1 = galois %a, exponents = [5, -1]
             return %c0
             %c1 = add_ptx %c1, @c
